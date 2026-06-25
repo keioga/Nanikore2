@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./style.css" />
+
+    <title>Google MediaPipe カメラ認識 PWA</title>
+</head>
+<body>
+
+    <h2>Google MediaPipe 物体認識ver1.0</h2>
+    <div id="status">システムを起動中...</div>
+    
+    <div class="container" id="container">
+        <video id="video" autoplay playsinline muted></video>
+    </div>
+
+    <script type="module">
+        import { ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/vision_bundle.mjs";
+
+        const video = document.getElementById('video');
+        const statusDiv = document.getElementById('status');
+        const container = document.getElementById('container');
+        let objectDetector;
+        let children = [];
+
+        // 1. カメラ起動
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                    audio: false
+                });
+                video.srcObject = stream;
+                return new Promise((resolve) => video.onloadedmetadata = () => resolve(video));
+            } catch (e) {
+                statusDiv.innerText = "カメラの起動に失敗: " + e.message;
+            }
+        }
+
+        // 2. AIモデルの初期化
+        async function initAI() {
+            statusDiv.innerText = "カメラとAIモデルを準備中...";
+            await setupCamera();
+            
+            try {
+                // WASMファイルをロード
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
+                );
+
+                // モデル（AI）をロード
+                objectDetector = await ObjectDetector.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+                        delegate: "CPU"
+                    },
+                    scoreThreshold: 0.5,
+                    runningMode: "VIDEO"
+                });
+                
+                statusDiv.innerText = "準備完了！カメラに物を映してください。";
+                predictLoop();
+            } catch (e) {
+                statusDiv.innerText = "エラーが発生しました: " + e.message;
+                console.error(e);
+            }
+        }
+
+        // 簡易日本語対応辞書
+        const jaLabels = {
+            "person": "人", "bicycle": "自転車", "car": "車", "motorcycle": "バイク",
+            "backpack": "リュック", "umbrella": "傘", "handbag": "ハンドバッグ", "tie": "ネクタイ",
+            "suitcase": "スーツケース", "bottle": "ボトル", "cup": "コップ", "chair": "椅子",
+            "couch": "ソファ", "potted plant": "観葉植物", "dining table": "机", "tv": "テレビ",
+            "laptop": "ノートパソコン", "mouse": "マウス", "remote": "リモコン", "keyboard": "キーボード",
+            "cell phone": "スマホ", "book": "本", "clock": "時計", "scissors": "ハサミ"
+        };
+
+        let lastTime = -1;
+        async function predictLoop() {
+            if (video.currentTime !== lastTime && video.readyState === video.HAVE_ENOUGH_DATA) {
+                lastTime = video.currentTime;
+                
+                const startTimeMs = performance.now();
+                const detections = objectDetector.detectForVideo(video, startTimeMs).detections;
+                
+                for (let i = 0; i < children.length; i++) {
+                    container.removeChild(children[i]);
+                }
+                children.splice(0);
+
+                for (let detection of detections) {
+                    const score = Math.round(detection.categories[0].score * 100);
+                    const englishLabel = detection.categories[0].categoryName;
+                    const labelText = jaLabels[englishLabel] || englishLabel;
+
+                    const videoWidth = video.offsetWidth;
+                    const videoHeight = video.offsetHeight;
+                    
+                    const boundingBox = detection.boundingBox;
+                    const left = (boundingBox.originX / video.videoWidth) * videoWidth;
+                    const top = (boundingBox.originY / video.videoHeight) * videoHeight;
+                    const width = (boundingBox.width / video.videoWidth) * videoWidth;
+                    const height = (boundingBox.height / video.videoHeight) * videoHeight;
+
+                    const highlighter = document.createElement('div');
+                    highlighter.setAttribute('class', 'highlighter');
+                    highlighter.style.left = `${left}px`;
+                    highlighter.style.top = `${top}px`;
+                    highlighter.style.width = `${width}px`;
+                    highlighter.style.height = `${height}px`;
+
+                    const label = document.createElement('p');
+                    label.setAttribute('class', 'label');
+                    label.innerText = `${labelText} (${score}%)`;
+                    
+                    highlighter.appendChild(label);
+                    container.appendChild(highlighter);
+                    children.push(highlighter);
+                }
+            }
+            window.requestAnimationFrame(predictLoop);
+        }
+
+        // 起動
+        initAI();
+    </script>
+
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

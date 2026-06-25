@@ -1,0 +1,25 @@
+body { 
+    font-family: sans-serif; 
+    text-align: center; 
+    margin: 0; 
+    padding: 20px; 
+    background: #f0f2f5; 
+}
+.container { 
+    position: relative; 
+    width: 100%; 
+    max-width: 500px; 
+    margin: 0 auto; 
+}
+
+#video { 
+    width: 100%; 
+    border-radius: 8px; 
+    background: #000; 
+}
+
+#status { 
+    color: #666; 
+    margin-bottom: 10px; 
+    font-size: 0.9rem; 
+}
