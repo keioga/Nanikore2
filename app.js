@@ -1,12 +1,12 @@
-// 1. 世界最新のWeb用AIライブラリを直接読み込む（APIキー一切不要）
 import { pipeline } from 'https://esm.sh';
 
 const video = document.getElementById('video');
 const statusDiv = document.getElementById('status');
+const startBtn = document.getElementById('start-btn');
 let classifier;
 let isProcessing = false;
 
-// 2. カメラの起動（iPhoneの再生バグ対策を徹底強化）
+// 1. カメラの起動
 async function setupCamera() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -14,59 +14,70 @@ async function setupCamera() {
             audio: false
         });
         video.srcObject = stream;
-        return new Promise((resolve) => {
+        
+        // iPhone向けにインライン再生を徹底
+        video.setAttribute('playsinline', '');
+        video.setAttribute('muted', '');
+        
+        return new Promise((resolve, reject) => {
             video.onloadedmetadata = () => {
-                video.play().then(() => resolve(video)).catch(e => {
-                    statusDiv.innerText = "再生エラー: " + e.message;
-                });
+                video.play()
+                    .then(() => {
+                        video.style.display = "block"; // 再生できたらビデオを表示
+                        resolve(video);
+                    })
+                    .catch(e => reject(new Error("ビデオ再生に失敗しました: " + e.message)));
             };
+            video.onerror = (e) => reject(new Error("ビデオストリームエラー"));
         });
     } catch (e) {
-        statusDiv.innerText = "カメラの起動に失敗: 権限を確認してください。";
-        console.error(e);
+        throw new Error("カメラへのアクセスが拒否されたか、カメラが見つかりません。");
     }
 }
 
-// 3. AIモデルの読み込み
-async function initAI() {
-    statusDiv.innerText = "AIモデルをダウンロード中...\n（初回のみ20MBほどの通信が発生します）";
-    await setupCamera();
+// 2. ユーザーがボタンを押した時の初期化処理
+async function startApp() {
+    startBtn.style.display = "none"; // ボタンを隠す
+    statusDiv.innerText = "カメラを起動中...";
     
     try {
-        // Google製の超軽量・高精度な次世代モデル「MobileViT」を読み込む
+        // 先にカメラを起動（ユーザーアクションの直後なのでiPhoneでも100%動く）
+        await setupCamera();
+        
+        statusDiv.innerText = "AIモデルをダウンロード中...\n（初回のみ20MBほどの通信が発生します。3〜5秒ほどお待ちください）";
+        
+        // Google製の超軽量・高精度AI「MobileViT」を読み込む
         classifier = await pipeline('image-classification', 'Xenova/mobilevit-small');
+        
         statusDiv.innerText = "準備完了！カメラに物を映してください。";
         
-        // 認識ループを開始（0.5秒に1回解析して負荷を抑える）
+        // 認識ループを開始（0.5秒に1回解析）
         setInterval(predictFrame, 500);
     } catch (e) {
-        statusDiv.innerText = "AIの読み込みに失敗しました: " + e.message;
+        statusDiv.innerHTML = `<span style="color:#ff4a4a; font-weight:bold;">【エラー】${e.message}</span>`;
+        startBtn.style.display = "inline-block"; // 失敗したらボタンを再表示
         console.error(e);
     }
 }
 
-// 4. リアルタイム認識ループ
+// 3. リアルタイム認識ループ
 async function predictFrame() {
-    // 映像データがあり、かつ前回の解析が終わっていれば実行
     if (video.readyState >= 2 && !isProcessing && classifier) {
         isProcessing = true;
         try {
-            // 1. ビデオの今の1コマをCanvasに「パシャッ」と隠れて撮影
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
-            // 2. Canvasから画像データ（DataURL）を取得して、そのままAIに丸投げ
-            const dataUrl = canvas.toDataURL('image/jpeg');
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
             const output = await classifier(dataUrl, { topk: 1 });
             
-            // 3. 結果を画面に表示
             if (output && output.length > 0) {
-                const topResult = output[0];
-                const name = topResult.label; // 認識された英単語
-                const score = Math.round(topResult.score * 100); // 確率(%)
+                const topResult = output[0]; // [0]を追加して正しく1番目の結果を取得
+                const name = topResult.label; 
+                const score = Math.round(topResult.score * 100); 
                 
                 statusDiv.innerHTML = `
                     認識結果:<br>
@@ -81,5 +92,5 @@ async function predictFrame() {
     }
 }
 
-// アプリ起動時に実行
-window.addEventListener('load', initAI);
+// ボタンを押したときにすべてを開始する
+startBtn.addEventListener('click', startApp);
